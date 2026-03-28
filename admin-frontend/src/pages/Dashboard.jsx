@@ -1,14 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart } from 'recharts';
 import {
   daysAgo,
   fetchOverviewStats,
-  fetchAvgSession,
+  fetchLiveUserCount,
   fetchDailyVisitors,
   fetchTopFilters,
   fetchTopProperties,
+  fetchTopCommunities,
   fetchTopClicks,
   fetchUsers,
+  fetchMostActiveUsers,
   fetchLiveFeed,
 } from '../lib/queries';
 
@@ -45,22 +47,27 @@ export default function Dashboard({ onLogout }) {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState({});
   const [liveFeed, setLiveFeed] = useState([]);
+  const [liveUsers, setLiveUsers] = useState(0);
   const liveInterval = useRef(null);
+  const liveUserInterval = useRef(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const since = daysAgo(range.days);
-      const [stats, avgSession, daily, filters, properties, clicks, users] = await Promise.all([
+      const [stats, liveCount, daily, filters, properties, communities, clicks, users, activeUsers] = await Promise.all([
         fetchOverviewStats(since),
-        fetchAvgSession(since),
+        fetchLiveUserCount(),
         fetchDailyVisitors(since),
         fetchTopFilters(since),
         fetchTopProperties(since),
+        fetchTopCommunities(since),
         fetchTopClicks(since),
         fetchUsers(),
+        fetchMostActiveUsers(since),
       ]);
-      setData({ stats, avgSession, daily, filters, properties, clicks, users });
+      setLiveUsers(liveCount);
+      setData({ stats, daily, filters, properties, communities, clicks, users, activeUsers });
     } catch (err) {
       console.error('Failed to load dashboard data:', err?.message || err);
     } finally {
@@ -69,6 +76,15 @@ export default function Dashboard({ onLogout }) {
   }, [range]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Live user count polling (every 30s)
+  useEffect(() => {
+    const poll = async () => {
+      try { setLiveUsers(await fetchLiveUserCount()); } catch {}
+    };
+    liveUserInterval.current = setInterval(poll, 30000);
+    return () => clearInterval(liveUserInterval.current);
+  }, []);
 
   // Live feed polling
   useEffect(() => {
@@ -84,7 +100,7 @@ export default function Dashboard({ onLogout }) {
     return () => clearInterval(liveInterval.current);
   }, [tab]);
 
-  const { stats = {}, avgSession = 0, daily = [], filters = [], properties = [], clicks = [], users = [] } = data;
+  const { stats = {}, daily = [], filters = [], properties = [], communities = [], clicks = [], users = [], activeUsers = [] } = data;
 
   return (
     <div className="dashboard">
@@ -129,34 +145,71 @@ export default function Dashboard({ onLogout }) {
         {/* ─── Overview Tab ─── */}
         {tab === 'overview' && (
           <div className="fade-in">
-            {/* Stat cards */}
+            {/* KPI cards */}
             <div className="stat-grid">
-              <StatCard label="Sessions" value={stats.totalSessions ?? '—'} />
-              <StatCard label="Page Views" value={stats.pageviews ?? '—'} />
-              <StatCard label="Logged-in Users" value={stats.uniqueUsers ?? '—'} />
-              <StatCard label="Avg Session" value={avgSession ? `${avgSession}s` : '—'} />
-              <StatCard label="Total Events" value={stats.totalEvents ?? '—'} />
+              <StatCard label="Live Now" value={liveUsers} accent="var(--red)" pulse />
+              <StatCard label="Unique Visitors" value={stats.uniqueVisitors ?? '—'} />
+              <StatCard label="Pages Viewed" value={stats.pageviews ?? '—'} />
+              <StatCard label="Total Time Spent" value={stats.totalTimeHours ? `${stats.totalTimeHours}h` : '—'} />
             </div>
 
-            {/* Daily visitors chart */}
+            {/* Daily visitors + pages chart */}
             <div className="card fade-in" style={{ animationDelay: '0.05s' }}>
-              <div className="section-title">Daily Visitors</div>
+              <div className="section-title">Daily Activity</div>
               {daily.length > 0 ? (
-                <ResponsiveContainer width="100%" height={260}>
-                  <LineChart data={daily}>
+                <ResponsiveContainer width="100%" height={280}>
+                  <ComposedChart data={daily}>
                     <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
                     <XAxis dataKey="date" tick={{ fill: 'var(--muted)', fontSize: 11 }} tickLine={false} />
-                    <YAxis tick={{ fill: 'var(--muted)', fontSize: 11 }} tickLine={false} axisLine={false} allowDecimals={false} />
+                    <YAxis yAxisId="left" tick={{ fill: 'var(--muted)', fontSize: 11 }} tickLine={false} axisLine={false} allowDecimals={false} />
+                    <YAxis yAxisId="right" orientation="right" tick={{ fill: 'var(--muted)', fontSize: 11 }} tickLine={false} axisLine={false} allowDecimals={false} />
                     <Tooltip
                       contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border2)', borderRadius: 8, fontSize: 12 }}
                       labelStyle={{ color: 'var(--muted)' }}
-                      itemStyle={{ color: 'var(--accent)' }}
                     />
-                    <Line type="monotone" dataKey="visitors" stroke="var(--accent)" strokeWidth={2} dot={false} />
-                  </LineChart>
+                    <Bar yAxisId="left" dataKey="visitors" fill="var(--accent)" opacity={0.3} radius={[4, 4, 0, 0]} name="Unique Visitors" />
+                    <Line yAxisId="right" type="monotone" dataKey="pages" stroke="var(--accent2)" strokeWidth={2} dot={false} name="Pages Viewed" />
+                  </ComposedChart>
                 </ResponsiveContainer>
               ) : (
                 <p className="empty">No visitor data yet</p>
+              )}
+            </div>
+
+            {/* Most Active Users */}
+            <div className="card fade-in" style={{ animationDelay: '0.08s' }}>
+              <div className="section-title">Most Active Users</div>
+              {activeUsers.length > 0 ? (
+                <div className="table-scroll">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>User</th>
+                        <th className="hide-mobile" style={{ textAlign: 'right' }}>Page Views</th>
+                        <th className="hide-mobile" style={{ textAlign: 'right' }}>Properties</th>
+                        <th style={{ textAlign: 'right' }}>Events</th>
+                        <th className="hide-mobile" style={{ textAlign: 'right' }}>Time</th>
+                        <th>Last Seen</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeUsers.map((u, i) => (
+                        <tr key={u.email || u.sessionId || i}>
+                          <td className="rank">{i + 1}</td>
+                          <td className="mono">{u.email || <span className="muted">{u.sessionId?.slice(0, 10)}...</span>}</td>
+                          <td className="hide-mobile" style={{ textAlign: 'right' }}>{u.pageviews}</td>
+                          <td className="hide-mobile" style={{ textAlign: 'right' }}>{u.propertyViews}</td>
+                          <td style={{ textAlign: 'right' }}><span className="count-badge">{u.events}</span></td>
+                          <td className="hide-mobile" style={{ textAlign: 'right' }}>{u.totalTimeMins > 0 ? `${u.totalTimeMins}m` : '—'}</td>
+                          <td className="mono muted" style={{ fontSize: '0.7rem' }}>{formatDate(u.lastSeen)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="empty">No user data yet</p>
               )}
             </div>
 
@@ -166,10 +219,10 @@ export default function Dashboard({ onLogout }) {
                 <div className="section-title">Top Filters</div>
                 {filters.length > 0 ? (
                   <ResponsiveContainer width="100%" height={Math.max(200, filters.length * 28)}>
-                    <BarChart data={filters} layout="vertical" margin={{ left: 100, right: 20 }}>
+                    <BarChart data={filters} layout="vertical" margin={{ left: 80, right: 20 }}>
                       <CartesianGrid stroke="var(--border)" horizontal={false} />
                       <XAxis type="number" tick={{ fill: 'var(--muted)', fontSize: 11 }} tickLine={false} allowDecimals={false} />
-                      <YAxis type="category" dataKey="filter" tick={{ fill: 'var(--text)', fontSize: 11 }} tickLine={false} axisLine={false} width={100} />
+                      <YAxis type="category" dataKey="filter" tick={{ fill: 'var(--text)', fontSize: 10 }} tickLine={false} axisLine={false} width={80} />
                       <Tooltip
                         contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border2)', borderRadius: 8, fontSize: 12 }}
                         labelStyle={{ color: 'var(--muted)' }}
@@ -207,25 +260,72 @@ export default function Dashboard({ onLogout }) {
               </div>
             </div>
 
+            {/* Most viewed communities */}
+            <div className="card fade-in" style={{ animationDelay: '0.12s' }}>
+              <div className="section-title">Most Viewed Communities</div>
+              {communities.length > 0 ? (
+                <div className="table-scroll">
+                  <table className="data-table">
+                    <thead>
+                      <tr><th>#</th><th>Community</th><th style={{ textAlign: 'right' }}>Views</th><th style={{ textAlign: 'right' }}>Unique Viewers</th></tr>
+                    </thead>
+                    <tbody>
+                      {communities.map((c, i) => (
+                        <tr key={i}>
+                          <td className="rank">{i + 1}</td>
+                          <td>{c.community}</td>
+                          <td style={{ textAlign: 'right' }}>{c.views}</td>
+                          <td style={{ textAlign: 'right' }}>{c.viewers}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="empty">No community data yet</p>
+              )}
+            </div>
+
             {/* Most viewed properties */}
             <div className="card fade-in" style={{ animationDelay: '0.15s' }}>
               <div className="section-title">Most Viewed Properties</div>
               {properties.length > 0 ? (
-                <table className="data-table">
-                  <thead>
-                    <tr><th>#</th><th>Property Name</th><th style={{ textAlign: 'right' }}>Views</th><th style={{ textAlign: 'right' }}>Unique Viewers</th></tr>
-                  </thead>
-                  <tbody>
-                    {properties.map((p, i) => (
-                      <tr key={i}>
-                        <td className="rank">{i + 1}</td>
-                        <td>{p.property_name}</td>
-                        <td style={{ textAlign: 'right' }}>{p.views}</td>
-                        <td style={{ textAlign: 'right' }}>{p.viewers}</td>
+                <div className="table-scroll">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Property Name</th>
+                        <th style={{ textAlign: 'right' }}>Views</th>
+                        <th style={{ textAlign: 'right' }}>Unique Viewers</th>
+                        <th className="hide-mobile">Link</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {properties.map((p, i) => (
+                        <tr key={i}>
+                          <td className="rank">{i + 1}</td>
+                          <td>
+                            <a href={`https://dxbdipfinder.com/listing/${p.property_id}`} target="_blank" rel="noopener noreferrer" className="prop-link">
+                              {p.property_name}
+                            </a>
+                          </td>
+                          <td style={{ textAlign: 'right' }}>{p.views}</td>
+                          <td style={{ textAlign: 'right' }}>{p.viewers}</td>
+                          <td className="hide-mobile">
+                            {p.url ? (
+                              <a href={p.url} target="_blank" rel="noopener noreferrer" className="ext-link" title="View on source site">
+                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                  <path d="M12 9v4a1 1 0 01-1 1H3a1 1 0 01-1-1V5a1 1 0 011-1h4M9 2h5v5M6 10l8-8" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              </a>
+                            ) : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               ) : (
                 <p className="empty">No property view data yet</p>
               )}
@@ -239,21 +339,23 @@ export default function Dashboard({ onLogout }) {
             <div className="card">
               <div className="section-title">All Visitors</div>
               {users.length > 0 ? (
-                <table className="data-table">
-                  <thead>
-                    <tr><th>User</th><th style={{ textAlign: 'right' }}>Total Events</th><th>Most Viewed Property</th><th>Last Seen</th></tr>
-                  </thead>
-                  <tbody>
-                    {users.map((u, i) => (
-                      <tr key={u.email || u.sessionId || i}>
-                        <td className="mono">{u.email || <span className="muted">{u.sessionId?.slice(0, 12)}…</span>}</td>
-                        <td style={{ textAlign: 'right' }}>{u.events}</td>
-                        <td>{u.topProperty || '—'}</td>
-                        <td className="mono muted">{formatDate(u.lastSeen)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div className="table-scroll">
+                  <table className="data-table">
+                    <thead>
+                      <tr><th>User</th><th style={{ textAlign: 'right' }}>Total Events</th><th className="hide-mobile">Most Viewed Property</th><th>Last Seen</th></tr>
+                    </thead>
+                    <tbody>
+                      {users.map((u, i) => (
+                        <tr key={u.email || u.sessionId || i}>
+                          <td className="mono">{u.email || <span className="muted">{u.sessionId?.slice(0, 12)}...</span>}</td>
+                          <td style={{ textAlign: 'right' }}>{u.events}</td>
+                          <td className="hide-mobile">{u.topProperty || '—'}</td>
+                          <td className="mono muted" style={{ fontSize: '0.7rem' }}>{formatDate(u.lastSeen)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               ) : (
                 <p className="empty">No visitors yet</p>
               )}
@@ -268,6 +370,7 @@ export default function Dashboard({ onLogout }) {
               <div className="section-title">
                 <span className="live-dot" />
                 Live Feed
+                <span className="live-count">{liveUsers} online</span>
               </div>
               {liveFeed.length > 0 ? (
                 <div className="live-list">
@@ -278,11 +381,11 @@ export default function Dashboard({ onLogout }) {
                       <div key={ev.id} className="live-row">
                         <span className="live-time mono">{formatTime(ev.created_at)}</span>
                         <span className="event-badge" style={{ background: badge.bg, color: badge.color }}>
-                          {ev.event_type}
+                          {ev.event_type.replace('_', ' ')}
                         </span>
                         <span className="live-page">{ev.page || ''}</span>
                         {ev.property_name && <span className="live-prop">{ev.property_name}</span>}
-                        {preview && <span className="live-data muted">{preview}</span>}
+                        <span className="live-data muted hide-mobile">{preview}</span>
                         <span className="live-user mono">{ev.user_email || ev.session_id?.slice(0, 8)}</span>
                       </div>
                     );
@@ -299,11 +402,14 @@ export default function Dashboard({ onLogout }) {
   );
 }
 
-function StatCard({ label, value }) {
+function StatCard({ label, value, accent, pulse }) {
   return (
     <div className="card stat-card fade-in">
       <div className="section-title">{label}</div>
-      <div className="stat-value">{value}</div>
+      <div className="stat-value" style={accent ? { color: accent } : undefined}>
+        {pulse && value > 0 && <span className="live-dot" style={{ marginRight: 8, width: 10, height: 10 }} />}
+        {value}
+      </div>
     </div>
   );
 }
