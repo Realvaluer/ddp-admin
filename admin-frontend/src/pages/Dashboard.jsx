@@ -261,20 +261,26 @@ export default function Dashboard({ onLogout }) {
                     </thead>
                     <tbody>
                       {properties.map((p, i) => {
-                        const pLower = p.purpose?.toLowerCase() || '';
-                        const purposeLabel = (pLower === 'rent' || pLower === 'for rent') ? 'Rent' : pLower === 'sale' ? 'Sale' : null;
-                        const readyLabel = (p.ready_off_plan?.toLowerCase() === 'off_plan' || p.ready_off_plan === 'Off Plan') ? 'Off Plan' : p.ready_off_plan?.toLowerCase() === 'ready' ? 'Ready' : null;
+                        const pLower = (p.purpose || '').toLowerCase();
+                        const rLower = (p.ready_off_plan || '').toLowerCase();
                         return (
                         <tr key={i}>
                           <td className="rank">{i + 1}</td>
                           <td>
                             <span className="prop-name-row">
+                              {pLower.includes('rent')
+                                ? <span className="prop-tag tag-rent">RENT</span>
+                                : pLower.includes('sale')
+                                ? <span className="prop-tag tag-sale">SALE</span>
+                                : <span className="prop-tag tag-unknown">—</span>}
+                              {rLower === 'ready'
+                                ? <span className="prop-tag tag-ready">READY</span>
+                                : (rLower === 'off_plan' || rLower === 'off plan')
+                                ? <span className="prop-tag tag-offplan">OFFPLAN</span>
+                                : <span className="prop-tag tag-unknown">—</span>}
                               <a href={`https://dxbdipfinder.com/listing/${p.property_id}`} target="_blank" rel="noopener noreferrer" className="prop-link">
                                 {p.property_name}
                               </a>
-                              {readyLabel === 'Off Plan' && <span className="prop-tag tag-offplan">Off Plan</span>}
-                              {readyLabel === 'Ready' && <span className="prop-tag tag-ready">Ready</span>}
-                              {purposeLabel && <span className={`prop-tag ${purposeLabel === 'Rent' ? 'tag-rent' : 'tag-sale'}`}>{purposeLabel}</span>}
                             </span>
                           </td>
                           <td className="mono" style={{ textAlign: 'right', fontSize: '0.75rem' }}>
@@ -290,11 +296,13 @@ export default function Dashboard({ onLogout }) {
                           <td style={{ textAlign: 'right' }}>{p.views}</td>
                           <td className="hide-mobile" style={{ textAlign: 'right' }}>{p.viewers}</td>
                           <td>
-                            <a href={p.url || `https://dxbdipfinder.com/listing/${p.property_id}`} target="_blank" rel="noopener noreferrer" className="ext-link" title={p.url ? 'View on source' : 'View on DxbDipFinder'}>
-                              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                                <path d="M12 9v4a1 1 0 01-1 1H3a1 1 0 01-1-1V5a1 1 0 011-1h4M9 2h5v5M6 10l8-8" strokeLinecap="round" strokeLinejoin="round" />
-                              </svg>
-                            </a>
+                            {p.property_id ? (
+                              <a href={`https://dxbdipfinder.com/listing/${p.property_id}`} target="_blank" rel="noopener noreferrer" className="ext-link" title="View property">
+                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                  <path d="M12 9v4a1 1 0 01-1 1H3a1 1 0 01-1-1V5a1 1 0 011-1h4M9 2h5v5M6 10l8-8" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              </a>
+                            ) : '—'}
                           </td>
                         </tr>
                         );

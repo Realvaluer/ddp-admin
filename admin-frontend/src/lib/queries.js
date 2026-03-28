@@ -112,63 +112,26 @@ export async function fetchTopProperties(since) {
     .sort((a, b) => b.views - a.views)
     .slice(0, 10);
 
-  // Enrich missing data — try Supabase first, then fallback to main app API
-  const needEnrich = top.filter(p => !p.purpose || !p.ready_off_plan || p.price == null || !p.url);
-  if (needEnrich.length > 0) {
-    const ids = needEnrich.map(p => Number(p.property_id)).filter(Boolean);
-
-    // Try Supabase ddf_listings
-    let listingMap = {};
-    if (ids.length > 0) {
-      try {
-        const { data: listings, error: listErr } = await supabase
-          .from('ddf_listings')
-          .select('id, property_name, community, price_aed, change_pct, url, ready_off_plan, purpose')
-          .or(ids.map(id => `id.eq.${id}`).join(','));
-        if (listErr) console.warn('Supabase listings query failed:', listErr.message);
-        if (listings && listings.length > 0) {
-          for (const l of listings) listingMap[String(l.id)] = l;
-        }
-      } catch (e) {
-        console.warn('Supabase listings error:', e);
-      }
-    }
-
-    // Fallback: fetch from main app API for any still missing
-    const stillMissing = needEnrich.filter(p => !listingMap[p.property_id]);
-    if (stillMissing.length > 0) {
-      for (const p of stillMissing) {
-        try {
-          const res = await fetch(`https://www.dxbdipfinder.com/api/listings/${p.property_id}`);
-          if (res.ok) {
-            const l = await res.json();
-            listingMap[p.property_id] = {
-              id: l.id,
-              property_name: l.property_name,
-              community: l.community,
-              price_aed: l.price_aed,
-              change_pct: l.change_pct,
-              url: l.url,
-              ready_off_plan: l.ready_off_plan,
-              purpose: l.purpose,
-            };
-          }
-        } catch {}
-      }
-    }
-
-    // Apply enrichment
-    for (const p of top) {
-      const l = listingMap[p.property_id];
-      if (!l) continue;
-      if (p.price == null) p.price = l.price_aed;
-      if (p.change_pct == null) p.change_pct = l.change_pct;
-      if (!p.url) p.url = l.url;
-      if (!p.community) p.community = l.community;
-      if (!p.property_name || p.property_name === p.property_id) p.property_name = l.property_name || l.community;
-      if (!p.ready_off_plan) p.ready_off_plan = l.ready_off_plan || null;
-      if (!p.purpose) p.purpose = l.purpose || null;
-    }
+  // Enrich ALL properties from main app API (guaranteed to work)
+  const enrichResults = await Promise.allSettled(
+    top.map(p =>
+      fetch(`https://www.dxbdipfinder.com/api/listings/${p.property_id}`)
+        .then(r => r.ok ? r.json() : null)
+        .catch(() => null)
+    )
+  );
+  for (let i = 0; i < top.length; i++) {
+    const l = enrichResults[i].status === 'fulfilled' ? enrichResults[i].value : null;
+    if (!l) continue;
+    const p = top[i];
+    // API returns: listing_type (Sale/Rent), ready_off_plan, current_price, listing_url, etc
+    p.purpose = l.listing_type || l.purpose || p.purpose || null;
+    p.ready_off_plan = l.ready_off_plan || p.ready_off_plan || null;
+    if (p.price == null) p.price = l.current_price || l.price_aed || null;
+    if (p.change_pct == null) p.change_pct = l.change_pct ?? l.dip_percent ?? null;
+    if (!p.url) p.url = l.listing_url || l.url || null;
+    if (!p.community) p.community = l.location || l.community || null;
+    if (!p.property_name || p.property_name === p.property_id) p.property_name = l.property_name || l.location || p.property_name;
   }
 
   return top.map(r => ({
