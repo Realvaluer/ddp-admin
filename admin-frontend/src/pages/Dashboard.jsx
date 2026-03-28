@@ -261,19 +261,20 @@ export default function Dashboard({ onLogout }) {
                     </thead>
                     <tbody>
                       {properties.map((p, i) => {
-                        const purposeLabel = p.purpose?.toLowerCase() === 'rent' ? 'Rent' : 'Sale';
+                        const purposeLabel = (p.purpose?.toLowerCase() === 'rent' || p.purpose?.toLowerCase() === 'for rent') ? 'Rent' : 'Sale';
                         const readyLabel = (p.ready_off_plan === 'off_plan' || p.ready_off_plan === 'Off Plan') ? 'Off Plan' : null;
                         return (
                         <tr key={i}>
                           <td className="rank">{i + 1}</td>
                           <td>
-                            <a href={`https://dxbdipfinder.com/listing/${p.property_id}`} target="_blank" rel="noopener noreferrer" className="prop-link">
-                              {p.property_name}
-                            </a>
-                            <div className="prop-tags">
+                            <span className="prop-name-row">
+                              <a href={`https://dxbdipfinder.com/listing/${p.property_id}`} target="_blank" rel="noopener noreferrer" className="prop-link">
+                                {p.property_name}
+                              </a>
                               {readyLabel && <span className="prop-tag tag-offplan">{readyLabel}</span>}
+                              {!readyLabel && <span className="prop-tag tag-ready">Ready</span>}
                               <span className={`prop-tag ${purposeLabel === 'Rent' ? 'tag-rent' : 'tag-sale'}`}>{purposeLabel}</span>
-                            </div>
+                            </span>
                           </td>
                           <td className="mono" style={{ textAlign: 'right', fontSize: '0.75rem' }}>
                             {formatPrice(p.price)}
