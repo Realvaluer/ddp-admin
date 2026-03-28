@@ -111,11 +111,13 @@ export async function fetchTopProperties(since) {
   // Always enrich from listings table for complete data
   const ids = top.map(p => Number(p.property_id)).filter(Boolean);
   if (ids.length > 0) {
-    const { data: listings } = await supabase
+    // Try both number and string IDs for compatibility
+    const { data: listings, error: listErr } = await supabase
       .from('ddf_listings')
       .select('id, property_name, community, price_aed, change_pct, url, ready_off_plan, purpose')
-      .in('id', ids);
-    if (listings) {
+      .or(ids.map(id => `id.eq.${id}`).join(','));
+    if (listErr) console.error('Listings enrich error:', listErr.message);
+    if (listings && listings.length > 0) {
       const listingMap = {};
       for (const l of listings) listingMap[String(l.id)] = l;
       for (const p of top) {
@@ -169,7 +171,7 @@ export async function fetchTopCommunities(since) {
       const { data: listings } = await supabase
         .from('ddf_listings')
         .select('id, community')
-        .in('id', ids);
+        .or(ids.map(id => `id.eq.${id}`).join(','));
       if (listings) {
         for (const l of listings) communityMap[String(l.id)] = l.community;
       }
