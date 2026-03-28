@@ -252,7 +252,7 @@ export default function Dashboard({ onLogout }) {
                       <tr>
                         <th>#</th>
                         <th>Property</th>
-                        <th className="hide-mobile" style={{ textAlign: 'right' }}>Price</th>
+                        <th style={{ textAlign: 'right' }}>Price</th>
                         <th style={{ textAlign: 'right' }}>Dip %</th>
                         <th style={{ textAlign: 'right' }}>Views</th>
                         <th className="hide-mobile" style={{ textAlign: 'right' }}>Viewers</th>
@@ -260,15 +260,22 @@ export default function Dashboard({ onLogout }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {properties.map((p, i) => (
+                      {properties.map((p, i) => {
+                        const purposeLabel = p.purpose?.toLowerCase() === 'rent' ? 'Rent' : 'Sale';
+                        const readyLabel = (p.ready_off_plan === 'off_plan' || p.ready_off_plan === 'Off Plan') ? 'Off Plan' : null;
+                        return (
                         <tr key={i}>
                           <td className="rank">{i + 1}</td>
                           <td>
                             <a href={`https://dxbdipfinder.com/listing/${p.property_id}`} target="_blank" rel="noopener noreferrer" className="prop-link">
                               {p.property_name}
                             </a>
+                            <div className="prop-tags">
+                              {readyLabel && <span className="prop-tag tag-offplan">{readyLabel}</span>}
+                              <span className={`prop-tag ${purposeLabel === 'Rent' ? 'tag-rent' : 'tag-sale'}`}>{purposeLabel}</span>
+                            </div>
                           </td>
-                          <td className="hide-mobile mono" style={{ textAlign: 'right', fontSize: '0.75rem' }}>
+                          <td className="mono" style={{ textAlign: 'right', fontSize: '0.75rem' }}>
                             {formatPrice(p.price)}
                           </td>
                           <td style={{ textAlign: 'right' }}>
@@ -281,22 +288,15 @@ export default function Dashboard({ onLogout }) {
                           <td style={{ textAlign: 'right' }}>{p.views}</td>
                           <td className="hide-mobile" style={{ textAlign: 'right' }}>{p.viewers}</td>
                           <td>
-                            {p.url ? (
-                              <a href={p.url} target="_blank" rel="noopener noreferrer" className="ext-link" title="View on source">
-                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                                  <path d="M12 9v4a1 1 0 01-1 1H3a1 1 0 01-1-1V5a1 1 0 011-1h4M9 2h5v5M6 10l8-8" strokeLinecap="round" strokeLinejoin="round" />
-                                </svg>
-                              </a>
-                            ) : (
-                              <a href={`https://dxbdipfinder.com/listing/${p.property_id}`} target="_blank" rel="noopener noreferrer" className="ext-link" title="View on DxbDipFinder">
-                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                                  <path d="M12 9v4a1 1 0 01-1 1H3a1 1 0 01-1-1V5a1 1 0 011-1h4M9 2h5v5M6 10l8-8" strokeLinecap="round" strokeLinejoin="round" />
-                                </svg>
-                              </a>
-                            )}
+                            <a href={p.url || `https://dxbdipfinder.com/listing/${p.property_id}`} target="_blank" rel="noopener noreferrer" className="ext-link" title={p.url ? 'View on source' : 'View on DxbDipFinder'}>
+                              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                <path d="M12 9v4a1 1 0 01-1 1H3a1 1 0 01-1-1V5a1 1 0 011-1h4M9 2h5v5M6 10l8-8" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            </a>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

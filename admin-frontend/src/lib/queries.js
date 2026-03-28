@@ -108,27 +108,26 @@ export async function fetchTopProperties(since) {
     .sort((a, b) => b.views - a.views)
     .slice(0, 10);
 
-  // Enrich missing data from listings table
-  const needEnrich = top.filter(p => p.price == null || p.change_pct == null || !p.url || !p.community);
-  if (needEnrich.length > 0) {
-    const ids = needEnrich.map(p => Number(p.property_id)).filter(Boolean);
-    if (ids.length > 0) {
-      const { data: listings } = await supabase
-        .from('ddf_listings')
-        .select('id, property_name, community, price_aed, change_pct, url')
-        .in('id', ids);
-      if (listings) {
-        const listingMap = {};
-        for (const l of listings) listingMap[String(l.id)] = l;
-        for (const p of top) {
-          const l = listingMap[p.property_id];
-          if (!l) continue;
-          if (p.price == null) p.price = l.price_aed;
-          if (p.change_pct == null) p.change_pct = l.change_pct;
-          if (!p.url) p.url = l.url;
-          if (!p.community) p.community = l.community;
-          if (!p.property_name || p.property_name === p.property_id) p.property_name = l.property_name || l.community;
-        }
+  // Always enrich from listings table for complete data
+  const ids = top.map(p => Number(p.property_id)).filter(Boolean);
+  if (ids.length > 0) {
+    const { data: listings } = await supabase
+      .from('ddf_listings')
+      .select('id, property_name, community, price_aed, change_pct, url, ready_off_plan, purpose')
+      .in('id', ids);
+    if (listings) {
+      const listingMap = {};
+      for (const l of listings) listingMap[String(l.id)] = l;
+      for (const p of top) {
+        const l = listingMap[p.property_id];
+        if (!l) continue;
+        if (p.price == null) p.price = l.price_aed;
+        if (p.change_pct == null) p.change_pct = l.change_pct;
+        if (!p.url) p.url = l.url;
+        if (!p.community) p.community = l.community;
+        if (!p.property_name || p.property_name === p.property_id) p.property_name = l.property_name || l.community;
+        p.ready_off_plan = l.ready_off_plan || null;
+        p.purpose = l.purpose || null;
       }
     }
   }
@@ -139,6 +138,8 @@ export async function fetchTopProperties(since) {
     url: r.url,
     price: r.price,
     change_pct: r.change_pct,
+    ready_off_plan: r.ready_off_plan || null,
+    purpose: r.purpose || null,
     views: r.views,
     viewers: r.viewers.size,
   }));
