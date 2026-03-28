@@ -31,7 +31,6 @@ export async function fetchOverviewStats(since) {
 }
 
 export async function fetchLiveUserCount() {
-  // Users active in the last 5 minutes
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
   const { data, error } = await supabase
     .from(TABLE)
@@ -42,24 +41,11 @@ export async function fetchLiveUserCount() {
   return unique.size;
 }
 
-export async function fetchAvgSession(since) {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .select('duration_ms')
-    .eq('event_type', 'session_end')
-    .gte('created_at', since);
-  if (error) throw error;
-  if (!data.length) return 0;
-
-  const total = data.reduce((sum, r) => sum + (r.duration_ms || 0), 0);
-  return Math.round(total / data.length / 1000);
-}
-
 export async function fetchDailyVisitors(since) {
   const { data, error } = await supabase
     .from(TABLE)
     .select('created_at, session_id, event_type')
-    .in('event_type', ['pageview'])
+    .eq('event_type', 'pageview')
     .gte('created_at', since)
     .order('created_at', { ascending: true });
   if (error) throw error;
@@ -87,31 +73,6 @@ export async function fetchDailyVisitors(since) {
     });
 }
 
-export async function fetchTopFilters(since) {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .select('event_data')
-    .eq('event_type', 'filter')
-    .gte('created_at', since);
-  if (error) throw error;
-
-  const counts = {};
-  for (const row of data) {
-    const ed = row.event_data;
-    if (!ed || typeof ed !== 'object') continue;
-    for (const [key, val] of Object.entries(ed)) {
-      if (val == null || val === '' || val === 'any') continue;
-      const label = `${key}: ${val}`;
-      counts[label] = (counts[label] || 0) + 1;
-    }
-  }
-
-  return Object.entries(counts)
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 15)
-    .map(([filter, count]) => ({ filter, count }));
-}
-
 export async function fetchTopProperties(since) {
   const { data, error } = await supabase
     .from(TABLE)
@@ -128,18 +89,30 @@ export async function fetchTopProperties(since) {
       property_id: pid,
       property_name: row.property_name || pid,
       url: row.event_data?.url || null,
+      price: row.event_data?.price || null,
+      change_pct: row.event_data?.change_pct ?? null,
       views: 0,
       viewers: new Set(),
     };
     grouped[pid].views++;
     if (row.user_email) grouped[pid].viewers.add(row.user_email);
     if (!grouped[pid].url && row.event_data?.url) grouped[pid].url = row.event_data.url;
+    if (grouped[pid].price == null && row.event_data?.price) grouped[pid].price = row.event_data.price;
+    if (grouped[pid].change_pct == null && row.event_data?.change_pct != null) grouped[pid].change_pct = row.event_data.change_pct;
   }
 
   return Object.values(grouped)
     .sort((a, b) => b.views - a.views)
-    .slice(0, 20)
-    .map(r => ({ property_id: r.property_id, property_name: r.property_name, url: r.url, views: r.views, viewers: r.viewers.size }));
+    .slice(0, 10)
+    .map(r => ({
+      property_id: r.property_id,
+      property_name: r.property_name,
+      url: r.url,
+      price: r.price,
+      change_pct: r.change_pct,
+      views: r.views,
+      viewers: r.viewers.size,
+    }));
 }
 
 export async function fetchTopCommunities(since) {
@@ -161,39 +134,17 @@ export async function fetchTopCommunities(since) {
 
   return Object.values(grouped)
     .sort((a, b) => b.views - a.views)
-    .slice(0, 15)
+    .slice(0, 10)
     .map(r => ({ community: r.community, views: r.views, viewers: r.viewers.size }));
 }
 
-export async function fetchTopClicks(since) {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .select('event_data')
-    .eq('event_type', 'click')
-    .gte('created_at', since);
-  if (error) throw error;
-
-  const counts = {};
-  for (const row of data) {
-    const button = row.event_data?.button;
-    if (!button) continue;
-    counts[button] = (counts[button] || 0) + 1;
-  }
-
-  return Object.entries(counts)
-    .sort(([, a], [, b]) => b - a)
-    .map(([button, count]) => ({ button, count }));
-}
-
 export async function fetchUsers() {
-  // Fetch ALL visitors ever — no date filter
   const { data, error } = await supabase
     .from(TABLE)
     .select('session_id, user_email, event_type, property_name, created_at')
     .order('created_at', { ascending: false });
   if (error) throw error;
 
-  // Group by email if logged in, otherwise by session_id
   const visitors = {};
   for (const row of data) {
     const key = row.user_email || `session:${row.session_id}`;
@@ -252,7 +203,7 @@ export async function fetchMostActiveUsers(since) {
 
   return Object.values(users)
     .sort((a, b) => b.events - a.events)
-    .slice(0, 15)
+    .slice(0, 10)
     .map(u => ({
       ...u,
       totalTimeMins: Math.round(u.totalTimeMs / 60000),

@@ -1,14 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart } from 'recharts';
+import { BarChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart } from 'recharts';
 import {
   daysAgo,
   fetchOverviewStats,
   fetchLiveUserCount,
   fetchDailyVisitors,
-  fetchTopFilters,
   fetchTopProperties,
   fetchTopCommunities,
-  fetchTopClicks,
   fetchUsers,
   fetchMostActiveUsers,
   fetchLiveFeed,
@@ -41,6 +39,13 @@ function formatDate(iso) {
     ' ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 }
 
+function formatPrice(aed) {
+  if (!aed) return '—';
+  if (aed >= 1000000) return `AED ${(aed / 1000000).toFixed(2)}M`;
+  if (aed >= 1000) return `AED ${(aed / 1000).toFixed(0)}K`;
+  return `AED ${aed.toLocaleString()}`;
+}
+
 export default function Dashboard({ onLogout }) {
   const [range, setRange] = useState(RANGES[0]);
   const [tab, setTab] = useState('overview');
@@ -55,19 +60,17 @@ export default function Dashboard({ onLogout }) {
     setLoading(true);
     try {
       const since = daysAgo(range.days);
-      const [stats, liveCount, daily, filters, properties, communities, clicks, users, activeUsers] = await Promise.all([
+      const [stats, liveCount, daily, properties, communities, users, activeUsers] = await Promise.all([
         fetchOverviewStats(since),
         fetchLiveUserCount(),
         fetchDailyVisitors(since),
-        fetchTopFilters(since),
         fetchTopProperties(since),
         fetchTopCommunities(since),
-        fetchTopClicks(since),
         fetchUsers(),
         fetchMostActiveUsers(since),
       ]);
       setLiveUsers(liveCount);
-      setData({ stats, daily, filters, properties, communities, clicks, users, activeUsers });
+      setData({ stats, daily, properties, communities, users, activeUsers });
     } catch (err) {
       console.error('Failed to load dashboard data:', err?.message || err);
     } finally {
@@ -77,7 +80,7 @@ export default function Dashboard({ onLogout }) {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Live user count polling (every 30s)
+  // Live user count polling
   useEffect(() => {
     const poll = async () => {
       try { setLiveUsers(await fetchLiveUserCount()); } catch {}
@@ -100,7 +103,7 @@ export default function Dashboard({ onLogout }) {
     return () => clearInterval(liveInterval.current);
   }, [tab]);
 
-  const { stats = {}, daily = [], filters = [], properties = [], communities = [], clicks = [], users = [], activeUsers = [] } = data;
+  const { stats = {}, daily = [], properties = [], communities = [], users = [], activeUsers = [] } = data;
 
   return (
     <div className="dashboard">
@@ -176,9 +179,9 @@ export default function Dashboard({ onLogout }) {
               )}
             </div>
 
-            {/* Most Active Users */}
+            {/* Top 10 Users */}
             <div className="card fade-in" style={{ animationDelay: '0.08s' }}>
-              <div className="section-title">Most Active Users</div>
+              <div className="section-title">Top 10 Users</div>
               {activeUsers.length > 0 ? (
                 <div className="table-scroll">
                   <table className="data-table">
@@ -213,56 +216,9 @@ export default function Dashboard({ onLogout }) {
               )}
             </div>
 
-            {/* Filters + Clicks */}
-            <div className="two-col fade-in" style={{ animationDelay: '0.1s' }}>
-              <div className="card">
-                <div className="section-title">Top Filters</div>
-                {filters.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={Math.max(200, filters.length * 28)}>
-                    <BarChart data={filters} layout="vertical" margin={{ left: 80, right: 20 }}>
-                      <CartesianGrid stroke="var(--border)" horizontal={false} />
-                      <XAxis type="number" tick={{ fill: 'var(--muted)', fontSize: 11 }} tickLine={false} allowDecimals={false} />
-                      <YAxis type="category" dataKey="filter" tick={{ fill: 'var(--text)', fontSize: 10 }} tickLine={false} axisLine={false} width={80} />
-                      <Tooltip
-                        contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border2)', borderRadius: 8, fontSize: 12 }}
-                        labelStyle={{ color: 'var(--muted)' }}
-                        itemStyle={{ color: 'var(--accent2)' }}
-                      />
-                      <Bar dataKey="count" fill="var(--accent2)" radius={[0, 4, 4, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <p className="empty">No filter data yet</p>
-                )}
-              </div>
-
-              <div className="card">
-                <div className="section-title">Button Clicks</div>
-                {clicks.length > 0 ? (
-                  <table className="data-table">
-                    <thead>
-                      <tr><th>Button</th><th style={{ textAlign: 'right' }}>Count</th></tr>
-                    </thead>
-                    <tbody>
-                      {clicks.map(c => (
-                        <tr key={c.button}>
-                          <td>{c.button}</td>
-                          <td style={{ textAlign: 'right' }}>
-                            <span className="count-badge">{c.count}</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <p className="empty">No click data yet</p>
-                )}
-              </div>
-            </div>
-
-            {/* Most viewed communities */}
-            <div className="card fade-in" style={{ animationDelay: '0.12s' }}>
-              <div className="section-title">Most Viewed Communities</div>
+            {/* Top 10 Communities */}
+            <div className="card fade-in" style={{ animationDelay: '0.1s' }}>
+              <div className="section-title">Top 10 Communities</div>
               {communities.length > 0 ? (
                 <div className="table-scroll">
                   <table className="data-table">
@@ -282,23 +238,25 @@ export default function Dashboard({ onLogout }) {
                   </table>
                 </div>
               ) : (
-                <p className="empty">No community data yet</p>
+                <p className="empty">No community data yet — view some properties to populate</p>
               )}
             </div>
 
-            {/* Most viewed properties */}
-            <div className="card fade-in" style={{ animationDelay: '0.15s' }}>
-              <div className="section-title">Most Viewed Properties</div>
+            {/* Top 10 Properties */}
+            <div className="card fade-in" style={{ animationDelay: '0.12s' }}>
+              <div className="section-title">Top 10 Properties</div>
               {properties.length > 0 ? (
                 <div className="table-scroll">
                   <table className="data-table">
                     <thead>
                       <tr>
                         <th>#</th>
-                        <th>Property Name</th>
+                        <th>Property</th>
+                        <th className="hide-mobile" style={{ textAlign: 'right' }}>Price</th>
+                        <th style={{ textAlign: 'right' }}>Dip %</th>
                         <th style={{ textAlign: 'right' }}>Views</th>
-                        <th style={{ textAlign: 'right' }}>Unique Viewers</th>
-                        <th className="hide-mobile">Link</th>
+                        <th className="hide-mobile" style={{ textAlign: 'right' }}>Viewers</th>
+                        <th>Link</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -310,16 +268,32 @@ export default function Dashboard({ onLogout }) {
                               {p.property_name}
                             </a>
                           </td>
+                          <td className="hide-mobile mono" style={{ textAlign: 'right', fontSize: '0.75rem' }}>
+                            {formatPrice(p.price)}
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            {p.change_pct != null ? (
+                              <span className={`dip-badge ${p.change_pct < 0 ? 'dip-neg' : 'dip-pos'}`}>
+                                {p.change_pct < 0 ? '' : '+'}{Number(p.change_pct).toFixed(1)}%
+                              </span>
+                            ) : '—'}
+                          </td>
                           <td style={{ textAlign: 'right' }}>{p.views}</td>
-                          <td style={{ textAlign: 'right' }}>{p.viewers}</td>
-                          <td className="hide-mobile">
+                          <td className="hide-mobile" style={{ textAlign: 'right' }}>{p.viewers}</td>
+                          <td>
                             {p.url ? (
-                              <a href={p.url} target="_blank" rel="noopener noreferrer" className="ext-link" title="View on source site">
+                              <a href={p.url} target="_blank" rel="noopener noreferrer" className="ext-link" title="View on source">
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                                   <path d="M12 9v4a1 1 0 01-1 1H3a1 1 0 01-1-1V5a1 1 0 011-1h4M9 2h5v5M6 10l8-8" strokeLinecap="round" strokeLinejoin="round" />
                                 </svg>
                               </a>
-                            ) : '—'}
+                            ) : (
+                              <a href={`https://dxbdipfinder.com/listing/${p.property_id}`} target="_blank" rel="noopener noreferrer" className="ext-link" title="View on DxbDipFinder">
+                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                  <path d="M12 9v4a1 1 0 01-1 1H3a1 1 0 01-1-1V5a1 1 0 011-1h4M9 2h5v5M6 10l8-8" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              </a>
+                            )}
                           </td>
                         </tr>
                       ))}
