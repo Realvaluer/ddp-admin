@@ -278,7 +278,7 @@ export default function Dashboard({ onLogout }) {
                                 : (rLower === 'off_plan' || rLower === 'off plan')
                                 ? <span className="prop-tag tag-offplan">OFFPLAN</span>
                                 : <span className="prop-tag tag-unknown">—</span>}
-                              <a href={`https://dxbdipfinder.com/listing/${p.property_id}`} target="_blank" rel="noopener noreferrer" className="prop-link">
+                              <a href={`https://www.dxbdipfinder.com/listing/${p.property_id}`} target="_blank" rel="noopener noreferrer" className="prop-link">
                                 {p.property_name}
                               </a>
                             </span>
@@ -297,7 +297,7 @@ export default function Dashboard({ onLogout }) {
                           <td className="hide-mobile" style={{ textAlign: 'right' }}>{p.viewers}</td>
                           <td>
                             {p.property_id ? (
-                              <a href={`https://dxbdipfinder.com/listing/${p.property_id}`} target="_blank" rel="noopener noreferrer" className="ext-link" title="View property">
+                              <a href={`https://www.dxbdipfinder.com/listing/${p.property_id}`} target="_blank" rel="noopener noreferrer" className="ext-link" title="View property">
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                                   <path d="M12 9v4a1 1 0 01-1 1H3a1 1 0 01-1-1V5a1 1 0 011-1h4M9 2h5v5M6 10l8-8" strokeLinecap="round" strokeLinejoin="round" />
                                 </svg>
