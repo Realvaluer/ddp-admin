@@ -91,6 +91,7 @@ export async function fetchTopProperties(since) {
       url: row.event_data?.url || null,
       price: row.event_data?.price || null,
       change_pct: row.event_data?.change_pct ?? null,
+      community: row.event_data?.community || null,
       views: 0,
       viewers: new Set(),
     };
@@ -99,33 +100,84 @@ export async function fetchTopProperties(since) {
     if (!grouped[pid].url && row.event_data?.url) grouped[pid].url = row.event_data.url;
     if (grouped[pid].price == null && row.event_data?.price) grouped[pid].price = row.event_data.price;
     if (grouped[pid].change_pct == null && row.event_data?.change_pct != null) grouped[pid].change_pct = row.event_data.change_pct;
+    if (!grouped[pid].community && row.event_data?.community) grouped[pid].community = row.event_data.community;
   }
 
-  return Object.values(grouped)
+  // Get top 10 by views
+  const top = Object.values(grouped)
     .sort((a, b) => b.views - a.views)
-    .slice(0, 10)
-    .map(r => ({
-      property_id: r.property_id,
-      property_name: r.property_name,
-      url: r.url,
-      price: r.price,
-      change_pct: r.change_pct,
-      views: r.views,
-      viewers: r.viewers.size,
-    }));
+    .slice(0, 10);
+
+  // Enrich missing data from listings table
+  const needEnrich = top.filter(p => p.price == null || p.change_pct == null || !p.url || !p.community);
+  if (needEnrich.length > 0) {
+    const ids = needEnrich.map(p => Number(p.property_id)).filter(Boolean);
+    if (ids.length > 0) {
+      const { data: listings } = await supabase
+        .from('ddf_listings')
+        .select('id, property_name, community, price_aed, change_pct, url')
+        .in('id', ids);
+      if (listings) {
+        const listingMap = {};
+        for (const l of listings) listingMap[String(l.id)] = l;
+        for (const p of top) {
+          const l = listingMap[p.property_id];
+          if (!l) continue;
+          if (p.price == null) p.price = l.price_aed;
+          if (p.change_pct == null) p.change_pct = l.change_pct;
+          if (!p.url) p.url = l.url;
+          if (!p.community) p.community = l.community;
+          if (!p.property_name || p.property_name === p.property_id) p.property_name = l.property_name || l.community;
+        }
+      }
+    }
+  }
+
+  return top.map(r => ({
+    property_id: r.property_id,
+    property_name: r.property_name,
+    url: r.url,
+    price: r.price,
+    change_pct: r.change_pct,
+    views: r.views,
+    viewers: r.viewers.size,
+  }));
 }
 
 export async function fetchTopCommunities(since) {
   const { data, error } = await supabase
     .from(TABLE)
-    .select('event_data, user_email')
+    .select('property_id, event_data, user_email')
     .eq('event_type', 'property_view')
     .gte('created_at', since);
   if (error) throw error;
 
+  // Collect property IDs that have no community in event_data
+  const missingCommunityIds = new Set();
+  for (const row of data) {
+    if (!row.event_data?.community && row.property_id) {
+      missingCommunityIds.add(Number(row.property_id));
+    }
+  }
+
+  // Enrich from listings table
+  const communityMap = {};
+  if (missingCommunityIds.size > 0) {
+    const ids = [...missingCommunityIds].filter(Boolean);
+    if (ids.length > 0) {
+      const { data: listings } = await supabase
+        .from('ddf_listings')
+        .select('id, community')
+        .in('id', ids);
+      if (listings) {
+        for (const l of listings) communityMap[String(l.id)] = l.community;
+      }
+    }
+  }
+
   const grouped = {};
   for (const row of data) {
-    const community = row.event_data?.community;
+    const community = row.event_data?.community || communityMap[row.property_id] || null;
     if (!community) continue;
     if (!grouped[community]) grouped[community] = { community, views: 0, viewers: new Set() };
     grouped[community].views++;
