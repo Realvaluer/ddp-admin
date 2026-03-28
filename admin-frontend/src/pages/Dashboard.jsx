@@ -35,7 +35,8 @@ function formatTime(iso) {
 
 function formatDate(iso) {
   const d = new Date(iso);
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) +
+    ' ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 }
 
 export default function Dashboard({ onLogout }) {
@@ -236,16 +237,16 @@ export default function Dashboard({ onLogout }) {
         {tab === 'users' && (
           <div className="fade-in">
             <div className="card">
-              <div className="section-title">Logged-in Users</div>
+              <div className="section-title">All Visitors</div>
               {users.length > 0 ? (
                 <table className="data-table">
                   <thead>
-                    <tr><th>Email</th><th style={{ textAlign: 'right' }}>Total Events</th><th>Most Viewed Property</th><th>Last Seen</th></tr>
+                    <tr><th>User</th><th style={{ textAlign: 'right' }}>Total Events</th><th>Most Viewed Property</th><th>Last Seen</th></tr>
                   </thead>
                   <tbody>
-                    {users.map(u => (
-                      <tr key={u.email}>
-                        <td className="mono">{u.email}</td>
+                    {users.map((u, i) => (
+                      <tr key={u.email || u.sessionId || i}>
+                        <td className="mono">{u.email || <span className="muted">{u.sessionId?.slice(0, 12)}…</span>}</td>
                         <td style={{ textAlign: 'right' }}>{u.events}</td>
                         <td>{u.topProperty || '—'}</td>
                         <td className="mono muted">{formatDate(u.lastSeen)}</td>
@@ -254,7 +255,7 @@ export default function Dashboard({ onLogout }) {
                   </tbody>
                 </table>
               ) : (
-                <p className="empty">No logged-in users yet</p>
+                <p className="empty">No visitors yet</p>
               )}
             </div>
           </div>

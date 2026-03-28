@@ -136,30 +136,37 @@ export async function fetchTopClicks(since) {
 }
 
 export async function fetchUsers() {
-  // Fetch ALL users ever — no date filter
+  // Fetch ALL visitors ever — no date filter
   const { data, error } = await supabase
     .from(TABLE)
-    .select('user_email, event_type, property_name, created_at')
-    .not('user_email', 'is', null)
+    .select('session_id, user_email, event_type, property_name, created_at')
     .order('created_at', { ascending: false });
   if (error) throw error;
 
-  const users = {};
+  // Group by email if logged in, otherwise by session_id
+  const visitors = {};
   for (const row of data) {
-    const email = row.user_email;
-    if (!users[email]) users[email] = { email, events: 0, lastSeen: row.created_at, propertyCounts: {} };
-    users[email].events++;
+    const key = row.user_email || `session:${row.session_id}`;
+    if (!visitors[key]) visitors[key] = {
+      email: row.user_email || null,
+      sessionId: row.session_id,
+      events: 0,
+      lastSeen: row.created_at,
+      propertyCounts: {},
+    };
+    visitors[key].events++;
     if (row.property_name) {
-      users[email].propertyCounts[row.property_name] = (users[email].propertyCounts[row.property_name] || 0) + 1;
+      visitors[key].propertyCounts[row.property_name] = (visitors[key].propertyCounts[row.property_name] || 0) + 1;
     }
   }
 
-  return Object.values(users)
+  return Object.values(visitors)
     .sort((a, b) => b.events - a.events)
     .map(u => {
       const topProperty = Object.entries(u.propertyCounts).sort(([, a], [, b]) => b - a)[0];
       return {
         email: u.email,
+        sessionId: u.sessionId,
         events: u.events,
         lastSeen: u.lastSeen,
         topProperty: topProperty ? topProperty[0] : null,
