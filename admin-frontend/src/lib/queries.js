@@ -135,12 +135,12 @@ export async function fetchTopClicks(since) {
     .map(([button, count]) => ({ button, count }));
 }
 
-export async function fetchUsers(since) {
+export async function fetchUsers() {
+  // Fetch ALL users ever — no date filter
   const { data, error } = await supabase
     .from(TABLE)
     .select('user_email, event_type, property_name, created_at')
     .not('user_email', 'is', null)
-    .gte('created_at', since)
     .order('created_at', { ascending: false });
   if (error) throw error;
 

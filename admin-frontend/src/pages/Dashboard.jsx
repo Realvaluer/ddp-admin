@@ -57,7 +57,7 @@ export default function Dashboard({ onLogout }) {
         fetchTopFilters(since),
         fetchTopProperties(since),
         fetchTopClicks(since),
-        fetchUsers(since),
+        fetchUsers(),
       ]);
       setData({ stats, avgSession, daily, filters, properties, clicks, users });
     } catch (err) {
