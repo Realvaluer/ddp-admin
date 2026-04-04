@@ -151,7 +151,20 @@ export default function Dashboard({ onLogout }) {
             {/* KPI cards */}
             <div className="stat-grid">
               <StatCard label="Live Now" value={liveUsers} accent="var(--red)" pulse />
-              <StatCard label="Unique Visitors" value={stats.uniqueVisitors ?? '—'} />
+              <div className="card stat-card fade-in">
+                <div className="section-title">Visitors</div>
+                <div className="stat-dual">
+                  <div className="stat-dual-item">
+                    <div className="stat-value">{stats.uniqueVisitors ?? '—'}</div>
+                    <div className="stat-sub">unique people</div>
+                  </div>
+                  <div className="stat-dual-divider" />
+                  <div className="stat-dual-item">
+                    <div className="stat-value">{stats.uniqueVisits ?? '—'}</div>
+                    <div className="stat-sub">visits</div>
+                  </div>
+                </div>
+              </div>
               <StatCard label="Pages Viewed" value={stats.pageviews ?? '—'} />
               <StatCard label="Total Time Spent" value={stats.totalTimeHours ? `${stats.totalTimeHours}h` : '—'} />
             </div>

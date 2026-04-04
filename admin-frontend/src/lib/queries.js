@@ -2,11 +2,36 @@ import { supabase } from './supabase';
 
 const TABLE = 'DDP_analytics';
 
+// Configurable exclude list — these emails (and their associated sessions) are filtered out everywhere
+const EXCLUDED_EMAILS = [
+  'saadumerani@gmail.com',
+];
+
+// Normalise for case-insensitive comparison
+const EXCLUDED_SET = new Set(EXCLUDED_EMAILS.map(e => e.toLowerCase()));
+
 export function daysAgo(n) {
   const d = new Date();
   d.setDate(d.getDate() - n);
   d.setHours(0, 0, 0, 0);
   return d.toISOString();
+}
+
+// Build a set of session_ids associated with excluded emails
+function getExcludedSessions(rows) {
+  const excludedSessions = new Set();
+  for (const row of rows) {
+    if (row.user_email && EXCLUDED_SET.has(row.user_email.toLowerCase())) {
+      excludedSessions.add(row.session_id);
+    }
+  }
+  return excludedSessions;
+}
+
+function isExcluded(row, excludedSessions) {
+  if (row.user_email && EXCLUDED_SET.has(row.user_email.toLowerCase())) return true;
+  if (excludedSessions.has(row.session_id)) return true;
+  return false;
 }
 
 export async function fetchOverviewStats(since) {
@@ -16,17 +41,40 @@ export async function fetchOverviewStats(since) {
     .gte('created_at', since);
   if (error) throw error;
 
-  const pageviews = data.filter(r => r.event_type === 'pageview');
-  const uniqueVisitors = new Set(data.map(r => r.session_id));
-  const sessionEnds = data.filter(r => r.event_type === 'session_end' && r.duration_ms);
+  const excludedSessions = getExcludedSessions(data);
+  const filtered = data.filter(r => !isExcluded(r, excludedSessions));
+
+  const pageviews = filtered.filter(r => r.event_type === 'pageview');
+  const uniqueVisits = new Set(filtered.map(r => r.session_id));
+
+  // Unique visitors: deduplicate by email if logged in, otherwise by session_id
+  const emailsSeen = new Set();
+  const anonSessions = new Set();
+  for (const r of filtered) {
+    if (r.user_email) {
+      emailsSeen.add(r.user_email.toLowerCase());
+    } else {
+      anonSessions.add(r.session_id);
+    }
+  }
+  // Remove anon sessions that belong to a known email (logged in later in the session)
+  const emailSessionIds = new Set();
+  for (const r of filtered) {
+    if (r.user_email) emailSessionIds.add(r.session_id);
+  }
+  for (const sid of emailSessionIds) anonSessions.delete(sid);
+  const uniqueVisitors = emailsSeen.size + anonSessions.size;
+
+  const sessionEnds = filtered.filter(r => r.event_type === 'session_end' && r.duration_ms);
   const totalTimeMs = sessionEnds.reduce((sum, r) => sum + (r.duration_ms || 0), 0);
   const totalTimeHours = (totalTimeMs / 3600000).toFixed(1);
 
   return {
-    uniqueVisitors: uniqueVisitors.size,
+    uniqueVisits: uniqueVisits.size,
+    uniqueVisitors,
     pageviews: pageviews.length,
     totalTimeHours,
-    totalEvents: data.length,
+    totalEvents: filtered.length,
   };
 }
 
@@ -34,25 +82,30 @@ export async function fetchLiveUserCount() {
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
   const { data, error } = await supabase
     .from(TABLE)
-    .select('session_id')
+    .select('session_id, user_email')
     .gte('created_at', fiveMinAgo);
   if (error) throw error;
-  const unique = new Set(data.map(r => r.session_id));
+  const excludedSessions = getExcludedSessions(data);
+  const filtered = data.filter(r => !isExcluded(r, excludedSessions));
+  const unique = new Set(filtered.map(r => r.session_id));
   return unique.size;
 }
 
 export async function fetchDailyVisitors(since) {
   const { data, error } = await supabase
     .from(TABLE)
-    .select('created_at, session_id, event_type')
+    .select('created_at, session_id, user_email, event_type')
     .eq('event_type', 'pageview')
     .gte('created_at', since)
     .order('created_at', { ascending: true });
   if (error) throw error;
 
+  const excludedSessions = getExcludedSessions(data);
+  const filtered = data.filter(r => !isExcluded(r, excludedSessions));
+
   const byDay = {};
   const pagesByDay = {};
-  for (const row of data) {
+  for (const row of filtered) {
     const date = new Date(row.created_at);
     const key = date.toISOString().slice(0, 10);
     if (!byDay[key]) byDay[key] = new Set();
@@ -76,13 +129,16 @@ export async function fetchDailyVisitors(since) {
 export async function fetchTopProperties(since) {
   const { data, error } = await supabase
     .from(TABLE)
-    .select('property_id, property_name, user_email, event_data')
+    .select('property_id, property_name, user_email, session_id, event_data')
     .eq('event_type', 'property_view')
     .gte('created_at', since);
   if (error) throw error;
 
+  const excludedSessions = getExcludedSessions(data);
+  const filtered = data.filter(r => !isExcluded(r, excludedSessions));
+
   const grouped = {};
-  for (const row of data) {
+  for (const row of filtered) {
     const pid = row.property_id;
     if (!pid) continue;
     if (!grouped[pid]) grouped[pid] = {
@@ -124,14 +180,13 @@ export async function fetchTopProperties(since) {
     const l = enrichResults[i].status === 'fulfilled' ? enrichResults[i].value : null;
     if (!l) continue;
     const p = top[i];
-    // API returns: listing_type (Sale/Rent), ready_off_plan, current_price, listing_url, etc
-    p.purpose = l.listing_type || l.purpose || p.purpose || null;
+    p.purpose = l.purpose || l.listing_type || p.purpose || null;
     p.ready_off_plan = l.ready_off_plan || p.ready_off_plan || null;
-    if (p.price == null) p.price = l.current_price || l.price_aed || null;
+    if (p.price == null) p.price = l.price_aed || l.current_price || null;
     if (p.change_pct == null) p.change_pct = l.change_pct ?? l.dip_percent ?? null;
-    if (!p.url) p.url = l.listing_url || l.url || null;
-    if (!p.community) p.community = l.location || l.community || null;
-    if (!p.property_name || p.property_name === p.property_id) p.property_name = l.property_name || l.location || p.property_name;
+    if (!p.url) p.url = l.url || l.listing_url || null;
+    if (!p.community) p.community = l.community || l.location || null;
+    if (!p.property_name || p.property_name === p.property_id) p.property_name = l.property_name || l.community || p.property_name;
   }
 
   return top.map(r => ({
@@ -150,36 +205,41 @@ export async function fetchTopProperties(since) {
 export async function fetchTopCommunities(since) {
   const { data, error } = await supabase
     .from(TABLE)
-    .select('property_id, event_data, user_email')
+    .select('property_id, event_data, user_email, session_id')
     .eq('event_type', 'property_view')
     .gte('created_at', since);
   if (error) throw error;
 
+  const excludedSessions = getExcludedSessions(data);
+  const filtered = data.filter(r => !isExcluded(r, excludedSessions));
+
   // Collect property IDs that have no community in event_data
   const missingCommunityIds = new Set();
-  for (const row of data) {
+  for (const row of filtered) {
     if (!row.event_data?.community && row.property_id) {
       missingCommunityIds.add(Number(row.property_id));
     }
   }
 
-  // Enrich from listings table
+  // Enrich missing communities from main app API
   const communityMap = {};
   if (missingCommunityIds.size > 0) {
     const ids = [...missingCommunityIds].filter(Boolean);
-    if (ids.length > 0) {
-      const { data: listings } = await supabase
-        .from('ddf_listings')
-        .select('id, community')
-        .or(ids.map(id => `id.eq.${id}`).join(','));
-      if (listings) {
-        for (const l of listings) communityMap[String(l.id)] = l.community;
-      }
+    const results = await Promise.allSettled(
+      ids.map(id =>
+        fetch(`https://www.dxbdipfinder.com/api/listings/${id}`)
+          .then(r => r.ok ? r.json() : null)
+          .catch(() => null)
+      )
+    );
+    for (let i = 0; i < ids.length; i++) {
+      const l = results[i].status === 'fulfilled' ? results[i].value : null;
+      if (l?.community) communityMap[String(ids[i])] = l.community;
     }
   }
 
   const grouped = {};
-  for (const row of data) {
+  for (const row of filtered) {
     const community = row.event_data?.community || communityMap[row.property_id] || null;
     if (!community) continue;
     if (!grouped[community]) grouped[community] = { community, views: 0, viewers: new Set() };
@@ -200,8 +260,11 @@ export async function fetchUsers() {
     .order('created_at', { ascending: false });
   if (error) throw error;
 
+  const excludedSessions = getExcludedSessions(data);
+  const filtered = data.filter(r => !isExcluded(r, excludedSessions));
+
   const visitors = {};
-  for (const row of data) {
+  for (const row of filtered) {
     const key = row.user_email || `session:${row.session_id}`;
     if (!visitors[key]) visitors[key] = {
       email: row.user_email || null,
@@ -238,8 +301,11 @@ export async function fetchMostActiveUsers(since) {
     .order('created_at', { ascending: false });
   if (error) throw error;
 
+  const excludedSessions = getExcludedSessions(data);
+  const filtered = data.filter(r => !isExcluded(r, excludedSessions));
+
   const users = {};
-  for (const row of data) {
+  for (const row of filtered) {
     const key = row.user_email || `session:${row.session_id}`;
     if (!users[key]) users[key] = {
       email: row.user_email || null,
@@ -270,7 +336,9 @@ export async function fetchLiveFeed() {
     .from(TABLE)
     .select('*')
     .order('created_at', { ascending: false })
-    .limit(50);
+    .limit(100);
   if (error) throw error;
-  return data;
+
+  const excludedSessions = getExcludedSessions(data);
+  return data.filter(r => !isExcluded(r, excludedSessions)).slice(0, 50);
 }
