@@ -5,14 +5,17 @@ import {
   fetchOverviewStats,
   fetchLiveUserCount,
   fetchDailyVisitors,
+  fetchTopSources,
   fetchTopProperties,
   fetchTopCommunities,
   fetchUsers,
   fetchMostActiveUsers,
   fetchLiveFeed,
+  parseSource,
 } from '../lib/queries';
 
 const RANGES = [
+  { label: '1d', days: 1 },
   { label: '7d', days: 7 },
   { label: '30d', days: 30 },
   { label: '90d', days: 90 },
@@ -47,7 +50,7 @@ function formatPrice(aed) {
 }
 
 export default function Dashboard({ onLogout }) {
-  const [range, setRange] = useState(RANGES[0]);
+  const [range, setRange] = useState(RANGES[1]); // default 7d
   const [tab, setTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState({});
@@ -60,17 +63,18 @@ export default function Dashboard({ onLogout }) {
     setLoading(true);
     try {
       const since = daysAgo(range.days);
-      const [stats, liveCount, daily, properties, communities, users, activeUsers] = await Promise.all([
+      const [stats, liveCount, daily, sources, properties, communities, users, activeUsers] = await Promise.all([
         fetchOverviewStats(since),
         fetchLiveUserCount(),
         fetchDailyVisitors(since),
+        fetchTopSources(since),
         fetchTopProperties(since),
         fetchTopCommunities(since),
         fetchUsers(),
         fetchMostActiveUsers(since),
       ]);
       setLiveUsers(liveCount);
-      setData({ stats, daily, properties, communities, users, activeUsers });
+      setData({ stats, daily, sources, properties, communities, users, activeUsers });
     } catch (err) {
       console.error('Failed to load dashboard data:', err?.message || err);
     } finally {
@@ -103,7 +107,7 @@ export default function Dashboard({ onLogout }) {
     return () => clearInterval(liveInterval.current);
   }, [tab]);
 
-  const { stats = {}, daily = [], properties = [], communities = [], users = [], activeUsers = [] } = data;
+  const { stats = {}, daily = [], sources = [], properties = [], communities = [], users = [], activeUsers = [] } = data;
 
   return (
     <div className="dashboard">
@@ -149,24 +153,12 @@ export default function Dashboard({ onLogout }) {
         {tab === 'overview' && (
           <div className="fade-in">
             {/* KPI cards */}
-            <div className="stat-grid">
+            <div className="stat-grid-5">
               <StatCard label="Live Now" value={liveUsers} accent="var(--red)" pulse />
-              <div className="card stat-card fade-in">
-                <div className="section-title">Visitors</div>
-                <div className="stat-dual">
-                  <div className="stat-dual-item">
-                    <div className="stat-value">{stats.uniqueVisitors ?? '—'}</div>
-                    <div className="stat-sub">unique people</div>
-                  </div>
-                  <div className="stat-dual-divider" />
-                  <div className="stat-dual-item">
-                    <div className="stat-value">{stats.uniqueVisits ?? '—'}</div>
-                    <div className="stat-sub">visits</div>
-                  </div>
-                </div>
-              </div>
+              <StatCard label="Unique Visitors" value={stats.uniqueVisitors ?? '—'} />
+              <StatCard label="Unique Visits" value={stats.uniqueVisits ?? '—'} />
               <StatCard label="Pages Viewed" value={stats.pageviews ?? '—'} />
-              <StatCard label="Total Time Spent" value={stats.totalTimeHours ? `${stats.totalTimeHours}h` : '—'} />
+              <StatCard label="Time Spent" value={stats.totalTimeHours ? `${stats.totalTimeHours}h` : '—'} />
             </div>
 
             {/* Daily visitors + pages chart */}
@@ -192,41 +184,64 @@ export default function Dashboard({ onLogout }) {
               )}
             </div>
 
-            {/* Top 10 Users */}
-            <div className="card fade-in" style={{ animationDelay: '0.08s' }}>
-              <div className="section-title">Top 10 Users</div>
-              {activeUsers.length > 0 ? (
-                <div className="table-scroll">
+            {/* Top Traffic Sources + Top 10 Users side by side */}
+            <div className="two-col fade-in" style={{ animationDelay: '0.08s' }}>
+              <div className="card">
+                <div className="section-title">Traffic Sources</div>
+                {sources.length > 0 ? (
                   <table className="data-table">
                     <thead>
-                      <tr>
-                        <th>#</th>
-                        <th>User</th>
-                        <th className="hide-mobile" style={{ textAlign: 'right' }}>Page Views</th>
-                        <th className="hide-mobile" style={{ textAlign: 'right' }}>Properties</th>
-                        <th style={{ textAlign: 'right' }}>Events</th>
-                        <th className="hide-mobile" style={{ textAlign: 'right' }}>Time</th>
-                        <th>Last Seen</th>
-                      </tr>
+                      <tr><th>Source</th><th style={{ textAlign: 'right' }}>Visits</th></tr>
                     </thead>
                     <tbody>
-                      {activeUsers.map((u, i) => (
-                        <tr key={u.email || u.sessionId || i}>
-                          <td className="rank">{i + 1}</td>
-                          <td className="mono">{u.email || <span className="muted">{u.sessionId?.slice(0, 10)}...</span>}</td>
-                          <td className="hide-mobile" style={{ textAlign: 'right' }}>{u.pageviews}</td>
-                          <td className="hide-mobile" style={{ textAlign: 'right' }}>{u.propertyViews}</td>
-                          <td style={{ textAlign: 'right' }}><span className="count-badge">{u.events}</span></td>
-                          <td className="hide-mobile" style={{ textAlign: 'right' }}>{u.totalTimeMins > 0 ? `${u.totalTimeMins}m` : '—'}</td>
-                          <td className="mono muted" style={{ fontSize: '0.7rem' }}>{formatDate(u.lastSeen)}</td>
+                      {sources.map(s => (
+                        <tr key={s.source}>
+                          <td>
+                            <span className="source-badge">{s.source}</span>
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <span className="count-badge">{s.visits}</span>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
-                </div>
-              ) : (
-                <p className="empty">No user data yet</p>
-              )}
+                ) : (
+                  <p className="empty">No source data yet</p>
+                )}
+              </div>
+
+              <div className="card">
+                <div className="section-title">Top 10 Users</div>
+                {activeUsers.length > 0 ? (
+                  <div className="table-scroll">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>User</th>
+                          <th className="hide-mobile">Source</th>
+                          <th style={{ textAlign: 'right' }}>Events</th>
+                          <th className="hide-mobile">Last Seen</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {activeUsers.map((u, i) => (
+                          <tr key={u.email || u.sessionId || i}>
+                            <td className="rank">{i + 1}</td>
+                            <td className="mono">{u.email || <span className="muted">{u.sessionId?.slice(0, 10)}...</span>}</td>
+                            <td className="hide-mobile"><span className="source-badge source-sm">{u.source || 'Direct'}</span></td>
+                            <td style={{ textAlign: 'right' }}><span className="count-badge">{u.events}</span></td>
+                            <td className="hide-mobile mono muted" style={{ fontSize: '0.7rem' }}>{formatDate(u.lastSeen)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="empty">No user data yet</p>
+                )}
+              </div>
             </div>
 
             {/* Top 10 Communities */}
@@ -251,7 +266,7 @@ export default function Dashboard({ onLogout }) {
                   </table>
                 </div>
               ) : (
-                <p className="empty">No community data yet — view some properties to populate</p>
+                <p className="empty">No community data yet</p>
               )}
             </div>
 
@@ -339,12 +354,19 @@ export default function Dashboard({ onLogout }) {
                 <div className="table-scroll">
                   <table className="data-table">
                     <thead>
-                      <tr><th>User</th><th style={{ textAlign: 'right' }}>Total Events</th><th className="hide-mobile">Most Viewed Property</th><th>Last Seen</th></tr>
+                      <tr>
+                        <th>User</th>
+                        <th>Source</th>
+                        <th style={{ textAlign: 'right' }}>Total Events</th>
+                        <th className="hide-mobile">Most Viewed Property</th>
+                        <th>Last Seen</th>
+                      </tr>
                     </thead>
                     <tbody>
                       {users.map((u, i) => (
                         <tr key={u.email || u.sessionId || i}>
                           <td className="mono">{u.email || <span className="muted">{u.sessionId?.slice(0, 12)}...</span>}</td>
+                          <td><span className="source-badge source-sm">{u.source || 'Direct'}</span></td>
                           <td style={{ textAlign: 'right' }}>{u.events}</td>
                           <td className="hide-mobile">{u.topProperty || '—'}</td>
                           <td className="mono muted" style={{ fontSize: '0.7rem' }}>{formatDate(u.lastSeen)}</td>
@@ -373,7 +395,7 @@ export default function Dashboard({ onLogout }) {
                 <div className="live-list">
                   {liveFeed.map(ev => {
                     const badge = EVENT_BADGE[ev.event_type] || EVENT_BADGE.session_end;
-                    const preview = ev.event_data ? JSON.stringify(ev.event_data).slice(0, 80) : '';
+                    const source = parseSource(ev.referrer);
                     return (
                       <div key={ev.id} className="live-row">
                         <span className="live-time mono">{formatTime(ev.created_at)}</span>
@@ -382,7 +404,7 @@ export default function Dashboard({ onLogout }) {
                         </span>
                         <span className="live-page">{ev.page || ''}</span>
                         {ev.property_name && <span className="live-prop">{ev.property_name}</span>}
-                        <span className="live-data muted hide-mobile">{preview}</span>
+                        <span className="source-badge source-sm hide-mobile">{source}</span>
                         <span className="live-user mono">{ev.user_email || ev.session_id?.slice(0, 8)}</span>
                       </div>
                     );

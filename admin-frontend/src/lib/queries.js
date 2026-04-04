@@ -34,6 +34,34 @@ function isExcluded(row, excludedSessions) {
   return false;
 }
 
+// Parse referrer URL into a readable source name
+export function parseSource(referrer) {
+  if (!referrer) return 'Direct';
+  try {
+    const url = new URL(referrer);
+    const host = url.hostname.replace(/^www\./, '').toLowerCase();
+
+    if (host.includes('google')) return 'Google';
+    if (host.includes('instagram') || host === 'l.instagram.com') return 'Instagram';
+    if (host.includes('facebook') || host === 'l.facebook.com' || host === 'm.facebook.com') return 'Facebook';
+    if (host.includes('twitter') || host === 'x.com' || host === 't.co') return 'X (Twitter)';
+    if (host.includes('linkedin')) return 'LinkedIn';
+    if (host.includes('youtube')) return 'YouTube';
+    if (host.includes('whatsapp') || host === 'wa.me') return 'WhatsApp';
+    if (host.includes('tiktok')) return 'TikTok';
+    if (host.includes('reddit')) return 'Reddit';
+    if (host.includes('snapchat')) return 'Snapchat';
+    if (host.includes('telegram') || host === 't.me') return 'Telegram';
+    if (host.includes('bing')) return 'Bing';
+    if (host.includes('yahoo')) return 'Yahoo';
+    if (host.includes('dxbdipfinder') || host.includes('dxpdipfinder')) return 'Direct';
+
+    return host;
+  } catch {
+    return 'Direct';
+  }
+}
+
 export async function fetchOverviewStats(since) {
   const { data, error } = await supabase
     .from(TABLE)
@@ -57,7 +85,6 @@ export async function fetchOverviewStats(since) {
       anonSessions.add(r.session_id);
     }
   }
-  // Remove anon sessions that belong to a known email (logged in later in the session)
   const emailSessionIds = new Set();
   for (const r of filtered) {
     if (r.user_email) emailSessionIds.add(r.session_id);
@@ -126,6 +153,36 @@ export async function fetchDailyVisitors(since) {
     });
 }
 
+export async function fetchTopSources(since) {
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select('session_id, user_email, referrer')
+    .eq('event_type', 'pageview')
+    .gte('created_at', since);
+  if (error) throw error;
+
+  const excludedSessions = getExcludedSessions(data);
+  const filtered = data.filter(r => !isExcluded(r, excludedSessions));
+
+  // Get first referrer per session (the entry point)
+  const sessionSource = {};
+  for (const row of filtered) {
+    if (!sessionSource[row.session_id]) {
+      sessionSource[row.session_id] = parseSource(row.referrer);
+    }
+  }
+
+  // Count sessions per source
+  const counts = {};
+  for (const source of Object.values(sessionSource)) {
+    counts[source] = (counts[source] || 0) + 1;
+  }
+
+  return Object.entries(counts)
+    .sort(([, a], [, b]) => b - a)
+    .map(([source, visits]) => ({ source, visits }));
+}
+
 export async function fetchTopProperties(since) {
   const { data, error } = await supabase
     .from(TABLE)
@@ -163,12 +220,10 @@ export async function fetchTopProperties(since) {
     if (!grouped[pid].ready_off_plan && row.event_data?.ready_off_plan) grouped[pid].ready_off_plan = row.event_data.ready_off_plan;
   }
 
-  // Get top 10 by views
   const top = Object.values(grouped)
     .sort((a, b) => b.views - a.views)
     .slice(0, 10);
 
-  // Enrich ALL properties from main app API (guaranteed to work)
   const enrichResults = await Promise.allSettled(
     top.map(p =>
       fetch(`https://www.dxbdipfinder.com/api/listings/${p.property_id}`)
@@ -213,7 +268,6 @@ export async function fetchTopCommunities(since) {
   const excludedSessions = getExcludedSessions(data);
   const filtered = data.filter(r => !isExcluded(r, excludedSessions));
 
-  // Collect property IDs that have no community in event_data
   const missingCommunityIds = new Set();
   for (const row of filtered) {
     if (!row.event_data?.community && row.property_id) {
@@ -221,7 +275,6 @@ export async function fetchTopCommunities(since) {
     }
   }
 
-  // Enrich missing communities from main app API
   const communityMap = {};
   if (missingCommunityIds.size > 0) {
     const ids = [...missingCommunityIds].filter(Boolean);
@@ -256,8 +309,8 @@ export async function fetchTopCommunities(since) {
 export async function fetchUsers() {
   const { data, error } = await supabase
     .from(TABLE)
-    .select('session_id, user_email, event_type, property_name, created_at')
-    .order('created_at', { ascending: false });
+    .select('session_id, user_email, event_type, property_name, created_at, referrer')
+    .order('created_at', { ascending: true });
   if (error) throw error;
 
   const excludedSessions = getExcludedSessions(data);
@@ -271,9 +324,11 @@ export async function fetchUsers() {
       sessionId: row.session_id,
       events: 0,
       lastSeen: row.created_at,
+      firstSource: parseSource(row.referrer),
       propertyCounts: {},
     };
     visitors[key].events++;
+    visitors[key].lastSeen = row.created_at; // update to latest
     if (row.property_name) {
       visitors[key].propertyCounts[row.property_name] = (visitors[key].propertyCounts[row.property_name] || 0) + 1;
     }
@@ -288,6 +343,7 @@ export async function fetchUsers() {
         sessionId: u.sessionId,
         events: u.events,
         lastSeen: u.lastSeen,
+        source: u.firstSource,
         topProperty: topProperty ? topProperty[0] : null,
       };
     });
@@ -296,9 +352,9 @@ export async function fetchUsers() {
 export async function fetchMostActiveUsers(since) {
   const { data, error } = await supabase
     .from(TABLE)
-    .select('user_email, session_id, event_type, property_name, created_at, duration_ms')
+    .select('user_email, session_id, event_type, property_name, created_at, duration_ms, referrer')
     .gte('created_at', since)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: true });
   if (error) throw error;
 
   const excludedSessions = getExcludedSessions(data);
@@ -315,8 +371,10 @@ export async function fetchMostActiveUsers(since) {
       propertyViews: 0,
       totalTimeMs: 0,
       lastSeen: row.created_at,
+      source: parseSource(row.referrer),
     };
     users[key].events++;
+    users[key].lastSeen = row.created_at;
     if (row.event_type === 'pageview') users[key].pageviews++;
     if (row.event_type === 'property_view') users[key].propertyViews++;
     if (row.event_type === 'session_end' && row.duration_ms) users[key].totalTimeMs += row.duration_ms;
