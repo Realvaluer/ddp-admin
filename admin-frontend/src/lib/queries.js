@@ -12,9 +12,25 @@ const EXCLUDED_SET = new Set(EXCLUDED_EMAILS.map(e => e.toLowerCase()));
 
 export function daysAgo(n) {
   const d = new Date();
-  d.setDate(d.getDate() - n);
+  // 1d = today only (midnight today), 7d = 7 days back from today, etc.
+  d.setDate(d.getDate() - (n - 1));
   d.setHours(0, 0, 0, 0);
   return d.toISOString();
+}
+
+// Fetch all rows matching a query, bypassing Supabase's 1000-row default limit
+async function fetchAll(query) {
+  const PAGE = 1000;
+  let allData = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await query.range(from, from + PAGE - 1);
+    if (error) throw error;
+    allData = allData.concat(data);
+    if (data.length < PAGE) break;
+    from += PAGE;
+  }
+  return allData;
 }
 
 // Build a set of session_ids associated with excluded emails
@@ -63,11 +79,9 @@ export function parseSource(referrer) {
 }
 
 export async function fetchOverviewStats(since) {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .select('event_type, session_id, user_email, duration_ms')
-    .gte('created_at', since);
-  if (error) throw error;
+  const data = await fetchAll(
+    supabase.from(TABLE).select('event_type, session_id, user_email, duration_ms').gte('created_at', since)
+  );
 
   const excludedSessions = getExcludedSessions(data);
   const filtered = data.filter(r => !isExcluded(r, excludedSessions));
@@ -107,11 +121,9 @@ export async function fetchOverviewStats(since) {
 
 export async function fetchLiveUserCount() {
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-  const { data, error } = await supabase
-    .from(TABLE)
-    .select('session_id, user_email')
-    .gte('created_at', fiveMinAgo);
+  const { data, error } = await supabase.from(TABLE).select('session_id, user_email').gte('created_at', fiveMinAgo);
   if (error) throw error;
+  // Live count is always small, no pagination needed
   const excludedSessions = getExcludedSessions(data);
   const filtered = data.filter(r => !isExcluded(r, excludedSessions));
   const unique = new Set(filtered.map(r => r.session_id));
@@ -119,13 +131,9 @@ export async function fetchLiveUserCount() {
 }
 
 export async function fetchDailyVisitors(since) {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .select('created_at, session_id, user_email, event_type')
-    .eq('event_type', 'pageview')
-    .gte('created_at', since)
-    .order('created_at', { ascending: true });
-  if (error) throw error;
+  const data = await fetchAll(
+    supabase.from(TABLE).select('created_at, session_id, user_email, event_type').eq('event_type', 'pageview').gte('created_at', since).order('created_at', { ascending: true })
+  );
 
   const excludedSessions = getExcludedSessions(data);
   const filtered = data.filter(r => !isExcluded(r, excludedSessions));
@@ -154,12 +162,9 @@ export async function fetchDailyVisitors(since) {
 }
 
 export async function fetchTopSources(since) {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .select('session_id, user_email, referrer')
-    .eq('event_type', 'pageview')
-    .gte('created_at', since);
-  if (error) throw error;
+  const data = await fetchAll(
+    supabase.from(TABLE).select('session_id, user_email, referrer').eq('event_type', 'pageview').gte('created_at', since)
+  );
 
   const excludedSessions = getExcludedSessions(data);
   const filtered = data.filter(r => !isExcluded(r, excludedSessions));
@@ -184,12 +189,9 @@ export async function fetchTopSources(since) {
 }
 
 export async function fetchTopProperties(since) {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .select('property_id, property_name, user_email, session_id, event_data')
-    .eq('event_type', 'property_view')
-    .gte('created_at', since);
-  if (error) throw error;
+  const data = await fetchAll(
+    supabase.from(TABLE).select('property_id, property_name, user_email, session_id, event_data').eq('event_type', 'property_view').gte('created_at', since)
+  );
 
   const excludedSessions = getExcludedSessions(data);
   const filtered = data.filter(r => !isExcluded(r, excludedSessions));
@@ -258,12 +260,9 @@ export async function fetchTopProperties(since) {
 }
 
 export async function fetchTopCommunities(since) {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .select('property_id, event_data, user_email, session_id')
-    .eq('event_type', 'property_view')
-    .gte('created_at', since);
-  if (error) throw error;
+  const data = await fetchAll(
+    supabase.from(TABLE).select('property_id, event_data, user_email, session_id').eq('event_type', 'property_view').gte('created_at', since)
+  );
 
   const excludedSessions = getExcludedSessions(data);
   const filtered = data.filter(r => !isExcluded(r, excludedSessions));
@@ -307,11 +306,9 @@ export async function fetchTopCommunities(since) {
 }
 
 export async function fetchUsers() {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .select('session_id, user_email, event_type, property_name, created_at, referrer')
-    .order('created_at', { ascending: true });
-  if (error) throw error;
+  const data = await fetchAll(
+    supabase.from(TABLE).select('session_id, user_email, event_type, property_name, created_at, referrer').order('created_at', { ascending: true })
+  );
 
   const excludedSessions = getExcludedSessions(data);
   const filtered = data.filter(r => !isExcluded(r, excludedSessions));
@@ -350,12 +347,9 @@ export async function fetchUsers() {
 }
 
 export async function fetchMostActiveUsers(since) {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .select('user_email, session_id, event_type, property_name, created_at, duration_ms, referrer')
-    .gte('created_at', since)
-    .order('created_at', { ascending: true });
-  if (error) throw error;
+  const data = await fetchAll(
+    supabase.from(TABLE).select('user_email, session_id, event_type, property_name, created_at, duration_ms, referrer').gte('created_at', since).order('created_at', { ascending: true })
+  );
 
   const excludedSessions = getExcludedSessions(data);
   const filtered = data.filter(r => !isExcluded(r, excludedSessions));
